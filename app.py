@@ -144,16 +144,20 @@ class VideoProcessor:
         self.lock = threading.Lock()
         self.alpha = ALPHA_DEFAULT
 
+    # def recv(self, frame):
+    #     img = frame.to_ndarray(format="bgr24")
+
+    #     with self.lock:
+    #         alpha = self.alpha
+
+    #     class_map = predict_class_map(self.model, img)
+    #     out = make_overlay(img, class_map, alpha)
+
+    #     return av.VideoFrame.from_ndarray(out, format="bgr24")
+
     def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
-
-        with self.lock:
-            alpha = self.alpha
-
-        class_map = predict_class_map(self.model, img)
-        out = make_overlay(img, class_map, alpha)
-
-        return av.VideoFrame.from_ndarray(out, format="bgr24")
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 
 # =========================================================
