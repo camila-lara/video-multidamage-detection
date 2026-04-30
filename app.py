@@ -135,7 +135,7 @@ class VideoProcessor:
 def main():
     global MODEL
 
-    st.set_page_config(page_title="Daño estructural en tiempo real", layout="wide")
+    st.set_page_config(page_title="Daño estructural en tiempo real V3", layout="wide")
     st.title("Segmentación multiclase de daño estructural en tiempo real")
 
     st.write(
