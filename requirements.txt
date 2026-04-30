@@ -1,6 +1,7 @@
 streamlit
 streamlit-webrtc==0.64.6
 tornado==6.4.2
+twilio
 av
 numpy
 opencv-python-headless
