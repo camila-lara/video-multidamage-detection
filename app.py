@@ -2,9 +2,8 @@
 '''
 This script creates a Streamlit app for real-time multiclass damage segmentation
 using streamlit-webrtc and a trained BiSeNetV2 model. The app receives frames from
-the browser camera, runs inference on each frame, and displays a multiclass overlay
-blended over the live video stream. The model is preloaded before the WebRTC session
-starts, and TURN configuration is optional.
+the browser camera, runs inference on each frame, and displays only the multiclass
+overlay blended over the live video stream.
 '''
 
 import os
@@ -15,7 +14,7 @@ import cv2
 import numpy as np
 import streamlit as st
 import torch
-from streamlit_webrtc import webrtc_streamer, WebRtcMode
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 
 from bisenetv2_model import BiSeNetV2
 
@@ -32,7 +31,6 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MEAN = np.array((0.485, 0.456, 0.406), dtype=np.float32)
 STD = np.array((0.229, 0.224, 0.225), dtype=np.float32)
 
-CLASS_NAMES = ["background", "crack", "spalling", "corrosion"]
 PALETTE_BGR = np.array([
     [0,   0,   0],    # 0 background
     [255, 255, 255],  # 1 crack
@@ -99,35 +97,10 @@ def predict_class_map(model, frame_bgr):
     return pred
 
 
-def colorize_mask(class_map):
-    return PALETTE_BGR[class_map]
-
-
 def make_overlay(frame_bgr, class_map, alpha):
-    color_mask = colorize_mask(class_map)
+    color_mask = PALETTE_BGR[class_map]
     blended = cv2.addWeighted(frame_bgr, 1.0 - alpha, color_mask, alpha, 0.0)
     return blended
-
-
-def get_ice_servers():
-    ice_servers = [
-        {"urls": ["stun:stun.l.google.com:19302"]}
-    ]
-
-    if (
-        "TURN_URL" in st.secrets
-        and "TURN_USERNAME" in st.secrets
-        and "TURN_CREDENTIAL" in st.secrets
-    ):
-        ice_servers.append(
-            {
-                "urls": [st.secrets["TURN_URL"]],
-                "username": st.secrets["TURN_USERNAME"],
-                "credential": st.secrets["TURN_CREDENTIAL"],
-            }
-        )
-
-    return ice_servers
 
 
 # =========================================================
@@ -144,20 +117,16 @@ class VideoProcessor:
         self.lock = threading.Lock()
         self.alpha = ALPHA_DEFAULT
 
-    # def recv(self, frame):
-    #     img = frame.to_ndarray(format="bgr24")
-
-    #     with self.lock:
-    #         alpha = self.alpha
-
-    #     class_map = predict_class_map(self.model, img)
-    #     out = make_overlay(img, class_map, alpha)
-
-    #     return av.VideoFrame.from_ndarray(out, format="bgr24")
-
     def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+        with self.lock:
+            alpha = self.alpha
+
+        class_map = predict_class_map(self.model, img)
+        out = make_overlay(img, class_map, alpha)
+
+        return av.VideoFrame.from_ndarray(out, format="bgr24")
 
 
 # =========================================================
@@ -170,8 +139,8 @@ def main():
     st.title("Segmentación multiclase de daño estructural en tiempo real")
 
     st.write(
-        "Pulsa Start, permite acceso a la cámara del navegador y la app mostrará "
-        "el overlay de daño estructural sobre el video en tiempo real."
+        "Pulsa Start, permite acceso a la cámara y la app mostrará "
+        "el overlay multiclase sobre el video en tiempo real."
     )
 
     st.info(
@@ -186,30 +155,27 @@ def main():
     with st.spinner("Cargando modelo..."):
         MODEL = load_model()
 
-    ice_servers = get_ice_servers()
+    rtc_configuration = RTCConfiguration(
+        {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+    )
 
-    if len(ice_servers) == 1:
-        st.caption("WebRTC configurado con STUN. Si la cámara no conecta en algunas redes, puede ser necesario agregar TURN.")
-    else:
-        st.caption("WebRTC configurado con STUN + TURN.")
-
-    webrtc_streamer(
+    webrtc_ctx = webrtc_streamer(
         key="damage-realtime-multiclass",
         mode=WebRtcMode.SENDRECV,
-        frontend_rtc_configuration={"iceServers": ice_servers},
-        server_rtc_configuration={"iceServers": ice_servers},
+        rtc_configuration=rtc_configuration,
         media_stream_constraints={
-            "video": {"facingMode": {"ideal": "environment"}},
+            "video": {
+                "facingMode": {"ideal": "environment"}
+            },
             "audio": False,
         },
         video_processor_factory=VideoProcessor,
         async_processing=True,
     )
 
-    processor_state = st.session_state.get("damage-realtime-multiclass")
-    if processor_state and hasattr(processor_state, "video_processor") and processor_state.video_processor:
-        with processor_state.video_processor.lock:
-            processor_state.video_processor.alpha = alpha
+    if webrtc_ctx.video_processor:
+        with webrtc_ctx.video_processor.lock:
+            webrtc_ctx.video_processor.alpha = alpha
 
     st.markdown(
         """
@@ -217,7 +183,7 @@ def main():
         1. Pulsa **Start**.
         2. Acepta permisos de cámara en el navegador.
         3. Ajusta el alpha si lo necesitas.
-        4. En teléfono o tablet, el navegador puede intentar usar la cámara trasera.
+        4. Para usar cámara trasera en teléfono o tablet, el navegador puede elegirla con `facingMode=environment`.
         """
     )
 
