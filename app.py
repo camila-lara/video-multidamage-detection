@@ -54,13 +54,27 @@ def get_ice_servers():
         st.warning("No se encontraron credenciales de Twilio. Usando servidor STUN público (puede fallar en redes móviles).")
         return [{"urls": ["stun:stun.l.google.com:19302"]}]
 
+
 # --- Carga del modelo optimizada ---
 @st.cache_resource
 def load_model():
     model = BiSeNetV2(n_classes=4)
-    # IMPORTANTE: map_location=DEVICE permite cargar un modelo entrenado en GPU en una CPU
-    state_dict = torch.load(MODEL_PATH, map_location=DEVICE)
+    
+    # 1. Cargamos el archivo .pth completo
+    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
+    
+    # 2. Extraemos ÚNICAMENTE los pesos del modelo (ignorando epoch y métricas)
+    # Verificamos si es un diccionario que contiene la llave 'model_state'
+    if isinstance(checkpoint, dict) and 'model_state' in checkpoint:
+        state_dict = checkpoint['model_state']
+    elif isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+        state_dict = checkpoint['state_dict']
+    else:
+        state_dict = checkpoint # Por si acaso los pesos vinieran directos
+        
+    # 3. Ahora sí, cargamos solo los pesos al modelo
     model.load_state_dict(state_dict)
+    
     model.to(DEVICE)
     model.eval()
     return model
