@@ -2,8 +2,9 @@
 '''
 This script creates a Streamlit app for real-time multiclass damage segmentation
 using streamlit-webrtc and a trained BiSeNetV2 model. The app receives frames from
-the browser camera, runs inference on each frame, and displays either the original
-image, the color mask, or the overlay blended over the live video stream.
+the browser camera, runs inference on each frame, and displays a multiclass overlay
+blended over the live video stream. The model is preloaded before the WebRTC session
+starts, and TURN configuration is optional.
 '''
 
 import os
@@ -14,7 +15,7 @@ import cv2
 import numpy as np
 import streamlit as st
 import torch
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
 
 from bisenetv2_model import BiSeNetV2
 
@@ -22,7 +23,7 @@ from bisenetv2_model import BiSeNetV2
 # =========================================================
 # CONFIG
 # =========================================================
-IMG_SIZE = 512
+IMG_SIZE = 256
 ALPHA_DEFAULT = 0.45
 MODEL_PATH = "best_bisenetv2_multiclass.pth"
 
@@ -38,6 +39,8 @@ PALETTE_BGR = np.array([
     [0,   0, 255],    # 2 spalling
     [0, 255, 255],    # 3 corrosion
 ], dtype=np.uint8)
+
+MODEL = None
 
 
 # =========================================================
@@ -106,100 +109,7 @@ def make_overlay(frame_bgr, class_map, alpha):
     return blended
 
 
-def draw_legend(frame_bgr):
-    out = frame_bgr.copy()
-
-    x0 = 15
-    y0 = 20
-    box_size = 18
-    line_gap = 28
-
-    for i, class_name in enumerate(CLASS_NAMES):
-        color = tuple(int(v) for v in PALETTE_BGR[i].tolist())
-        y = y0 + i * line_gap
-
-        cv2.rectangle(out, (x0, y), (x0 + box_size, y + box_size), color, thickness=-1)
-        cv2.rectangle(out, (x0, y), (x0 + box_size, y + box_size), (255, 255, 255), thickness=1)
-
-        cv2.putText(
-            out,
-            f"{i}: {class_name}",
-            (x0 + box_size + 10, y + box_size - 4),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (255, 255, 255),
-            2,
-            cv2.LINE_AA
-        )
-
-    return out
-
-
-# =========================================================
-# VIDEO PROCESSOR
-# =========================================================
-class VideoProcessor:
-    def __init__(self):
-        self.model = load_model()
-        self.lock = threading.Lock()
-
-        self.alpha = ALPHA_DEFAULT
-        self.view_mode = "overlay"   # overlay | mask | original
-        self.show_legend = True
-
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-
-        with self.lock:
-            alpha = self.alpha
-            view_mode = self.view_mode
-            show_legend = self.show_legend
-
-        class_map = predict_class_map(self.model, img)
-
-        if view_mode == "mask":
-            out = colorize_mask(class_map)
-        elif view_mode == "original":
-            out = img
-        else:
-            out = make_overlay(img, class_map, alpha)
-
-        if show_legend and view_mode != "original":
-            out = draw_legend(out)
-
-        return av.VideoFrame.from_ndarray(out, format="bgr24")
-
-
-# =========================================================
-# APP
-# =========================================================
-def main():
-    st.set_page_config(page_title="Daño estructural en tiempo real", layout="wide")
-    st.title("Segmentación multiclase de daño estructural en tiempo real")
-    st.write(
-        "Pulsa Start, permite acceso a la cámara del navegador y la app mostrará "
-        "la segmentación multiclase sobre el video en tiempo real."
-    )
-
-    st.info(
-        f"Dispositivo usado por el modelo: {DEVICE}. "
-        "En Streamlit Cloud normalmente correrá en CPU."
-    )
-
-    with st.sidebar:
-        st.header("Parámetros")
-        alpha = st.slider("Alpha overlay", 0.05, 0.95, ALPHA_DEFAULT, 0.05)
-        view_mode = st.selectbox(
-            "Visualización",
-            ["overlay", "mask", "original"],
-            index=0
-        )
-        show_legend = st.checkbox("Mostrar leyenda", value=True)
-
-    rtc_configuration = RTCConfiguration(
-        {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
-    )
-
+def get_ice_servers():
     ice_servers = [
         {"urls": ["stun:stun.l.google.com:19302"]}
     ]
@@ -217,7 +127,69 @@ def main():
             }
         )
 
-    webrtc_ctx = webrtc_streamer(
+    return ice_servers
+
+
+# =========================================================
+# VIDEO PROCESSOR
+# =========================================================
+class VideoProcessor:
+    def __init__(self):
+        global MODEL
+
+        if MODEL is None:
+            MODEL = load_model()
+
+        self.model = MODEL
+        self.lock = threading.Lock()
+        self.alpha = ALPHA_DEFAULT
+
+    def recv(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+
+        with self.lock:
+            alpha = self.alpha
+
+        class_map = predict_class_map(self.model, img)
+        out = make_overlay(img, class_map, alpha)
+
+        return av.VideoFrame.from_ndarray(out, format="bgr24")
+
+
+# =========================================================
+# APP
+# =========================================================
+def main():
+    global MODEL
+
+    st.set_page_config(page_title="Daño estructural en tiempo real", layout="wide")
+    st.title("Segmentación multiclase de daño estructural en tiempo real")
+
+    st.write(
+        "Pulsa Start, permite acceso a la cámara del navegador y la app mostrará "
+        "el overlay de daño estructural sobre el video en tiempo real."
+    )
+
+    st.info(
+        f"Dispositivo usado por el modelo: {DEVICE}. "
+        "En Streamlit Cloud normalmente correrá en CPU."
+    )
+
+    with st.sidebar:
+        st.header("Parámetros")
+        alpha = st.slider("Alpha overlay", 0.05, 0.95, ALPHA_DEFAULT, 0.05)
+
+    with st.spinner("Cargando modelo..."):
+        MODEL = load_model()
+
+    ice_servers = get_ice_servers()
+
+    if len(ice_servers) == 1:
+        st.caption("WebRTC configurado con STUN. Si la cámara no conecta en algunas redes, puede ser necesario agregar TURN.")
+    else:
+        st.caption("WebRTC configurado con STUN + TURN.")
+
+    webrtc_streamer(
         key="damage-realtime-multiclass",
         mode=WebRtcMode.SENDRECV,
         frontend_rtc_configuration={"iceServers": ice_servers},
@@ -230,13 +202,17 @@ def main():
         async_processing=True,
     )
 
+    processor_state = st.session_state.get("damage-realtime-multiclass")
+    if processor_state and hasattr(processor_state, "video_processor") and processor_state.video_processor:
+        with processor_state.video_processor.lock:
+            processor_state.video_processor.alpha = alpha
 
     st.markdown(
         """
         Uso:
         1. Pulsa **Start**.
         2. Acepta permisos de cámara en el navegador.
-        3. Ajusta el alpha o cambia el modo de visualización.
+        3. Ajusta el alpha si lo necesitas.
         4. En teléfono o tablet, el navegador puede intentar usar la cámara trasera.
         """
     )
@@ -249,6 +225,7 @@ def main():
         **Corrosión:** Amarillo
         """
     )
+
 
 if __name__ == "__main__":
     main()
