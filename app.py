@@ -183,7 +183,7 @@ def main():
         1. Pulsa **Start**.
         2. Acepta permisos de cámara en el navegador.
         3. Ajusta el alpha si lo necesitas.
-        4. Para usar cámara trasera en teléfono o tablet, el navegador puede elegirla con `facingMode=environment`.
+        4. Para usar cámara trasera en teléfono o tablet, puede elegirla con `select device`.
         """
     )
 
