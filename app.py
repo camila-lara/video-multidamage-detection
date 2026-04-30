@@ -200,19 +200,28 @@ def main():
         {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
     )
 
+    ice_servers = [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {
+            "urls": [st.secrets["TURN_URL"]],
+            "username": st.secrets["TURN_USERNAME"],
+            "credential": st.secrets["TURN_CREDENTIAL"],
+        },
+    ]
+
     webrtc_ctx = webrtc_streamer(
         key="damage-realtime-multiclass",
         mode=WebRtcMode.SENDRECV,
-        rtc_configuration=rtc_configuration,
+        frontend_rtc_configuration={"iceServers": ice_servers},
+        server_rtc_configuration={"iceServers": ice_servers},
         media_stream_constraints={
-            "video": {
-                "facingMode": {"ideal": "environment"}
-            },
+            "video": {"facingMode": {"ideal": "environment"}},
             "audio": False,
         },
         video_processor_factory=VideoProcessor,
         async_processing=True,
     )
+
 
     st.markdown(
         """
