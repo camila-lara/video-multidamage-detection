@@ -1,0 +1,7 @@
+streamlit==1.38.0
+streamlit-webrtc==0.64.6
+tornado==6.4.2
+av
+numpy
+opencv-python-headless
+torch
