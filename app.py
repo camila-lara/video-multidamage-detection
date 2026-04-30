@@ -201,13 +201,21 @@ def main():
     )
 
     ice_servers = [
-        {"urls": ["stun:stun.l.google.com:19302"]},
-        {
-            "urls": [st.secrets["TURN_URL"]],
-            "username": st.secrets["TURN_USERNAME"],
-            "credential": st.secrets["TURN_CREDENTIAL"],
-        },
+        {"urls": ["stun:stun.l.google.com:19302"]}
     ]
+
+    if (
+        "TURN_URL" in st.secrets
+        and "TURN_USERNAME" in st.secrets
+        and "TURN_CREDENTIAL" in st.secrets
+    ):
+        ice_servers.append(
+            {
+                "urls": [st.secrets["TURN_URL"]],
+                "username": st.secrets["TURN_USERNAME"],
+                "credential": st.secrets["TURN_CREDENTIAL"],
+            }
+        )
 
     webrtc_ctx = webrtc_streamer(
         key="damage-realtime-multiclass",
